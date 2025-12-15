@@ -54,7 +54,11 @@ public class SupabaseAuthClient {
 
                         log.error("Supabase signup failed with status {}: {}", statusCode, body);
 
-                        if (statusCode == 422 || body.contains("already registered")) {
+                        // Check for duplicate user - Supabase returns 422 or error message containing these keywords
+                        if (statusCode == 422 ||
+                            body.contains("already registered") ||
+                            body.contains("User already registered") ||
+                            body.contains("already been registered")) {
                             throw new UserAlreadyExistsException("User with this email already exists");
                         }
                         if (statusCode == 400) {
@@ -68,7 +72,7 @@ public class SupabaseAuthClient {
                         throw new ServiceUnavailableException("Supabase authentication service is temporarily unavailable. Please try again later.");
                     })
                     .body(SupabaseAuthResponse.class);
-        } catch (UserAlreadyExistsException | ServiceUnavailableException | SupabaseAuthException e) {
+        } catch (SupabaseAuthException e) {
             throw e;
         } catch (ResourceAccessException e) {
             return handleNetworkError(e, "signup");
@@ -120,7 +124,7 @@ public class SupabaseAuthClient {
                     .toBodilessEntity();
 
             log.info("OTP sent successfully to email: {}", maskEmail(request.getEmail()));
-        } catch (RateLimitException | ServiceUnavailableException | SupabaseAuthException e) {
+        } catch (SupabaseAuthException e) {
             throw e;
         } catch (ResourceAccessException e) {
             handleNetworkError(e, "send OTP");
@@ -174,7 +178,7 @@ public class SupabaseAuthClient {
                         throw new ServiceUnavailableException("Authentication service is temporarily unavailable. Please try again later.");
                     })
                     .body(SupabaseAuthResponse.class);
-        } catch (InvalidOtpException | OtpExpiredException | ServiceUnavailableException | SupabaseAuthException e) {
+        } catch (SupabaseAuthException e) {
             throw e;
         } catch (ResourceAccessException e) {
             return handleNetworkError(e, "verify OTP");
