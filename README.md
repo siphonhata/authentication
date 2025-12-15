@@ -249,12 +249,74 @@ All errors follow this format:
 
 | Status | Error Code | Description |
 |--------|------------|-------------|
-| 400 | VALIDATION_ERROR | Invalid request data |
-| 401 | INVALID_OTP | Incorrect OTP code |
+| 400 | VALIDATION_ERROR | Invalid request data (missing fields, invalid email format, etc.) |
+| 400 | BAD_REQUEST | Invalid input provided to Supabase |
+| 401 | INVALID_OTP | Incorrect OTP code or OTP has expired |
+| 404 | ENDPOINT_NOT_FOUND | API endpoint doesn't exist (typo in URL) |
+| 405 | METHOD_NOT_ALLOWED | Wrong HTTP method (e.g., GET instead of POST) |
 | 409 | USER_ALREADY_EXISTS | Email already registered |
-| 410 | OTP_EXPIRED | OTP code expired (60 min) |
-| 429 | RATE_LIMIT_EXCEEDED | Too many requests |
-| 500 | INTERNAL_SERVER_ERROR | Server error |
+| 410 | OTP_EXPIRED | OTP code expired (valid for 60 minutes) |
+| 429 | RATE_LIMIT_EXCEEDED | Too many OTP requests (limit: 1 per 60 seconds) |
+| 500 | CONFIGURATION_ERROR | Invalid Supabase URL or missing configuration |
+| 503 | SERVICE_UNAVAILABLE | Supabase service unreachable or network error |
+| 500 | INTERNAL_SERVER_ERROR | Unexpected server error |
+
+### Detailed Error Examples
+
+**Invalid URL Configuration:**
+```json
+{
+  "statusCode": 500,
+  "error": "CONFIGURATION_ERROR",
+  "message": "Invalid Supabase URL. Please check your SUPABASE_URL configuration. Current error: Unable to resolve host.",
+  "timestamp": "2025-12-15T10:30:00",
+  "path": "/api/v1/auth/register"
+}
+```
+
+**Service Unavailable:**
+```json
+{
+  "statusCode": 503,
+  "error": "SERVICE_UNAVAILABLE",
+  "message": "Unable to connect to Supabase. Please check if the URL is correct and the service is accessible.",
+  "timestamp": "2025-12-15T10:30:00",
+  "path": "/api/v1/auth/register"
+}
+```
+
+**Connection Timeout:**
+```json
+{
+  "statusCode": 503,
+  "error": "SERVICE_UNAVAILABLE",
+  "message": "Connection to Supabase timed out. The service may be slow or unreachable. Please try again.",
+  "timestamp": "2025-12-15T10:30:00",
+  "path": "/api/v1/auth/verify-otp"
+}
+```
+
+**Endpoint Not Found (Typo in URL):**
+```json
+{
+  "statusCode": 404,
+  "error": "ENDPOINT_NOT_FOUND",
+  "message": "Endpoint not found: POST /api/v1auth/register. Available endpoints: POST /api/v1/auth/register, POST /api/v1/auth/verify-otp, POST /api/v1/auth/resend-otp, GET /api/v1/auth/health",
+  "timestamp": "2025-12-15T10:30:00",
+  "path": "/api/v1auth/register"
+}
+```
+
+**Wrong HTTP Method:**
+```json
+{
+  "statusCode": 405,
+  "error": "METHOD_NOT_ALLOWED",
+  "message": "HTTP method 'GET' is not supported for this endpoint. Supported methods: [POST]",
+  "timestamp": "2025-12-15T10:30:00",
+  "path": "/api/v1/auth/register"
+}
+```
 
 ## Project Structure
 

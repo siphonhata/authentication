@@ -4,15 +4,17 @@ import com.sipho.authentication.dto.supabase.SupabaseAuthResponse;
 import com.sipho.authentication.dto.supabase.SupabaseOtpRequest;
 import com.sipho.authentication.dto.supabase.SupabaseSignupRequest;
 import com.sipho.authentication.dto.supabase.SupabaseVerifyRequest;
-import com.sipho.authentication.exception.InvalidOtpException;
-import com.sipho.authentication.exception.OtpExpiredException;
-import com.sipho.authentication.exception.RateLimitException;
-import com.sipho.authentication.exception.UserAlreadyExistsException;
+import com.sipho.authentication.exception.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.ResourceAccessException;
+
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 
 /**
  * Client for communicating with Supabase GoTrue authentication API.
@@ -43,21 +45,36 @@ public class SupabaseAuthClient {
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, response) -> {
                         int statusCode = response.getStatusCode().value();
-                        String body = new String(response.getBody().readAllBytes());
+                        String body;
+                        try {
+                            body = new String(response.getBody().readAllBytes());
+                        } catch (Exception e) {
+                            body = "Unable to read response body";
+                        }
 
                         log.error("Supabase signup failed with status {}: {}", statusCode, body);
 
                         if (statusCode == 422 || body.contains("already registered")) {
                             throw new UserAlreadyExistsException("User with this email already exists");
                         }
-                        throw new RuntimeException("Signup failed: " + body);
+                        if (statusCode == 400) {
+                            throw new SupabaseAuthException("Invalid request data. Please check your input.", 400, "BAD_REQUEST");
+                        }
+                        throw new SupabaseAuthException("Signup failed: " + body, statusCode, "SIGNUP_FAILED");
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, response) -> {
+                        int statusCode = response.getStatusCode().value();
+                        log.error("Supabase server error during signup: {}", statusCode);
+                        throw new ServiceUnavailableException("Supabase authentication service is temporarily unavailable. Please try again later.");
                     })
                     .body(SupabaseAuthResponse.class);
-        } catch (UserAlreadyExistsException e) {
+        } catch (UserAlreadyExistsException | ServiceUnavailableException | SupabaseAuthException e) {
             throw e;
+        } catch (ResourceAccessException e) {
+            return handleNetworkError(e, "signup");
         } catch (Exception e) {
-            log.error("Error during signup: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to register user: " + e.getMessage(), e);
+            log.error("Unexpected error during signup: {}", e.getMessage(), e);
+            throw new ServiceUnavailableException("Failed to connect to authentication service. Please check your configuration.", e);
         }
     }
 
@@ -78,23 +95,38 @@ public class SupabaseAuthClient {
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, response) -> {
                         int statusCode = response.getStatusCode().value();
-                        String body = new String(response.getBody().readAllBytes());
+                        String body;
+                        try {
+                            body = new String(response.getBody().readAllBytes());
+                        } catch (Exception e) {
+                            body = "Unable to read response body";
+                        }
 
                         log.error("Supabase OTP request failed with status {}: {}", statusCode, body);
 
                         if (statusCode == 429) {
-                            throw new RateLimitException("Too many OTP requests. Please wait before trying again.");
+                            throw new RateLimitException("Too many OTP requests. Please wait 60 seconds before trying again.");
                         }
-                        throw new RuntimeException("OTP request failed: " + body);
+                        if (statusCode == 400) {
+                            throw new SupabaseAuthException("Invalid email address.", 400, "BAD_REQUEST");
+                        }
+                        throw new SupabaseAuthException("OTP request failed: " + body, statusCode, "OTP_REQUEST_FAILED");
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, response) -> {
+                        int statusCode = response.getStatusCode().value();
+                        log.error("Supabase server error during OTP request: {}", statusCode);
+                        throw new ServiceUnavailableException("Authentication service is temporarily unavailable. Please try again later.");
                     })
                     .toBodilessEntity();
 
             log.info("OTP sent successfully to email: {}", maskEmail(request.getEmail()));
-        } catch (RateLimitException e) {
+        } catch (RateLimitException | ServiceUnavailableException | SupabaseAuthException e) {
             throw e;
+        } catch (ResourceAccessException e) {
+            handleNetworkError(e, "send OTP");
         } catch (Exception e) {
-            log.error("Error sending OTP: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to send OTP: " + e.getMessage(), e);
+            log.error("Unexpected error sending OTP: {}", e.getMessage(), e);
+            throw new ServiceUnavailableException("Failed to send OTP. Please check your network connection.", e);
         }
     }
 
@@ -116,7 +148,12 @@ public class SupabaseAuthClient {
                     .retrieve()
                     .onStatus(HttpStatusCode::is4xxClientError, (req, response) -> {
                         int statusCode = response.getStatusCode().value();
-                        String body = new String(response.getBody().readAllBytes());
+                        String body;
+                        try {
+                            body = new String(response.getBody().readAllBytes());
+                        } catch (Exception e) {
+                            body = "Unable to read response body";
+                        }
 
                         log.error("Supabase OTP verification failed with status {}: {}", statusCode, body);
 
@@ -126,15 +163,63 @@ public class SupabaseAuthClient {
                         if (statusCode == 410 || body.contains("expired")) {
                             throw new OtpExpiredException("The OTP code has expired. Please request a new one.");
                         }
-                        throw new RuntimeException("OTP verification failed: " + body);
+                        if (statusCode == 400) {
+                            throw new SupabaseAuthException("Invalid verification request. Please check your input.", 400, "BAD_REQUEST");
+                        }
+                        throw new SupabaseAuthException("OTP verification failed: " + body, statusCode, "VERIFICATION_FAILED");
+                    })
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, response) -> {
+                        int statusCode = response.getStatusCode().value();
+                        log.error("Supabase server error during OTP verification: {}", statusCode);
+                        throw new ServiceUnavailableException("Authentication service is temporarily unavailable. Please try again later.");
                     })
                     .body(SupabaseAuthResponse.class);
-        } catch (InvalidOtpException | OtpExpiredException e) {
+        } catch (InvalidOtpException | OtpExpiredException | ServiceUnavailableException | SupabaseAuthException e) {
             throw e;
+        } catch (ResourceAccessException e) {
+            return handleNetworkError(e, "verify OTP");
         } catch (Exception e) {
-            log.error("Error verifying OTP: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to verify OTP: " + e.getMessage(), e);
+            log.error("Unexpected error verifying OTP: {}", e.getMessage(), e);
+            throw new ServiceUnavailableException("Failed to verify OTP. Please check your network connection.", e);
         }
+    }
+
+    /**
+     * Handle network-related errors with detailed messages.
+     */
+    private <T> T handleNetworkError(ResourceAccessException ex, String operation) {
+        Throwable cause = ex.getCause();
+
+        if (cause instanceof UnknownHostException) {
+            log.error("Invalid Supabase URL or DNS resolution failed during {}: {}", operation, cause.getMessage());
+            throw new ConfigurationException(
+                    "Invalid Supabase URL. Please check your SUPABASE_URL configuration. Current error: Unable to resolve host.",
+                    ex
+            );
+        }
+
+        if (cause instanceof ConnectException) {
+            log.error("Connection refused during {}: {}", operation, cause.getMessage());
+            throw new ServiceUnavailableException(
+                    "Unable to connect to Supabase. Please check if the URL is correct and the service is accessible.",
+                    ex
+            );
+        }
+
+        if (cause instanceof SocketTimeoutException) {
+            log.error("Connection timeout during {}: {}", operation, cause.getMessage());
+            throw new ServiceUnavailableException(
+                    "Connection to Supabase timed out. The service may be slow or unreachable. Please try again.",
+                    ex
+            );
+        }
+
+        // Generic network error
+        log.error("Network error during {}: {}", operation, ex.getMessage());
+        throw new ServiceUnavailableException(
+                "Network error occurred while connecting to authentication service. Please check your internet connection.",
+                ex
+        );
     }
 
     /**
