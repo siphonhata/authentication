@@ -6,7 +6,7 @@ import com.sipho.authentication.dto.request.VerifyOtpRequest;
 import com.sipho.authentication.dto.response.AuthResponse;
 import com.sipho.authentication.service.AuthService;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
+import lombok.RequiredArgsConstructor; 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

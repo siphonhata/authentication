@@ -15,7 +15,7 @@ import java.util.Map;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class SupabaseSignupRequest {
+public class SupabaseSignupRequest { 
 
     private String email;
 

@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -13,7 +14,7 @@ import java.util.Map;
  * Contains user information from Supabase.
  */
 @Data
-@Builder
+@Builder 
 @NoArgsConstructor
 @AllArgsConstructor
 public class UserData {
@@ -33,4 +34,10 @@ public class UserData {
 
     @JsonProperty("email_confirmed_at")
     private String emailConfirmedAt;
+
+    /**
+     * List of user identities from authentication providers.
+     * Empty list indicates user already exists (duplicate signup attempt).
+     */
+    private List<Map<String, Object>> identities;
 }

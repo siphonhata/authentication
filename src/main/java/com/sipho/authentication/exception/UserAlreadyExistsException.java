@@ -10,3 +10,4 @@ public class UserAlreadyExistsException extends SupabaseAuthException {
         super(message, 409, "USER_ALREADY_EXISTS");
     }
 }
+ 

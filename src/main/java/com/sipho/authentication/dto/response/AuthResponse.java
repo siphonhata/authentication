@@ -15,7 +15,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AuthResponse {
 
-    private UserData user;
+    private UserData user; 
 
     private SessionData session;
 

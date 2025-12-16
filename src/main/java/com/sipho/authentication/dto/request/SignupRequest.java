@@ -12,7 +12,7 @@ import lombok.NoArgsConstructor;
  * Request DTO for user registration.
  * Contains user details for creating a new account.
  */
-@Data
+@Data 
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor

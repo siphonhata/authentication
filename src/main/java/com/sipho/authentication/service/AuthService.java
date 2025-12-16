@@ -9,13 +9,15 @@ import com.sipho.authentication.dto.supabase.SupabaseAuthResponse;
 import com.sipho.authentication.dto.supabase.SupabaseOtpRequest;
 import com.sipho.authentication.dto.supabase.SupabaseSignupRequest;
 import com.sipho.authentication.dto.supabase.SupabaseVerifyRequest;
+import com.sipho.authentication.exception.UserAlreadyExistsException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.HashMap;
 import java.util.Map;
-
+ 
 /**
  * Service for authentication operations.
  * Handles user registration, OTP verification, and related business logic.
@@ -33,9 +35,18 @@ public class AuthService {
      *
      * @param request Signup request with user details
      * @return Authentication response with user data
+     * @throws UserAlreadyExistsException if user with email already exists
      */
     public AuthResponse registerUser(SignupRequest request) {
         log.info("Registering new user with email: {}", maskEmail(request.getEmail()));
+
+        // Check if user already exists before attempting signup
+        if (supabaseAuthClient.checkUserExists(request.getEmail())) {
+            log.warn("User with email {} already exists", maskEmail(request.getEmail()));
+            throw new UserAlreadyExistsException(
+                "User with email " + maskEmail(request.getEmail()) + " already exists"
+            );
+        }
 
         // Transform request to Supabase format
         Map<String, Object> userMetadata = new HashMap<>();
@@ -48,17 +59,30 @@ public class AuthService {
                 .data(userMetadata)
                 .build();
 
-        // Call Supabase to create user (OTP email sent automatically)
-        SupabaseAuthResponse supabaseResponse = supabaseAuthClient.signup(supabaseRequest);
+        try {
+            // Call Supabase to create user (OTP email sent automatically)
+            SupabaseAuthResponse supabaseResponse = supabaseAuthClient.signup(supabaseRequest);
 
-        log.info("User registered successfully. OTP sent to: {}", maskEmail(request.getEmail()));
+            log.info("User registered successfully. OTP sent to: {}", maskEmail(request.getEmail()));
 
-        // Build response
-        return AuthResponse.builder()
-                .user(supabaseResponse.getUser())
-                .session(null) // No session until OTP is verified
-                .message("Registration successful. Please check your email for the verification code.")
-                .build();
+            // Build response
+            return AuthResponse.builder()
+                    .user(supabaseResponse.getUser())
+                    .session(null) // No session until OTP is verified
+                    .message("Registration successful. Please check your email for the verification code.")
+                    .build();
+                    
+        } catch (@SuppressWarnings("deprecation") HttpClientErrorException.UnprocessableEntity e) {
+            // Supabase returns 422 when user already exists
+            log.warn("Attempted to register existing user: {}", maskEmail(request.getEmail()));
+            throw new UserAlreadyExistsException(
+                "User with email " + maskEmail(request.getEmail()) + " already exists"
+            );
+        } catch (HttpClientErrorException e) {
+            // Handle other HTTP errors from Supabase
+            log.error("Error during user registration: {}", e.getMessage());
+            throw new RuntimeException("Registration failed: " + e.getMessage(), e);
+        }
     }
 
     /**

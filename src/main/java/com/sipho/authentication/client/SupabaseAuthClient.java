@@ -1,6 +1,6 @@
 package com.sipho.authentication.client;
 
-import com.sipho.authentication.dto.supabase.SupabaseAuthResponse;
+import com.sipho.authentication.dto.supabase.SupabaseAuthResponse; 
 import com.sipho.authentication.dto.supabase.SupabaseOtpRequest;
 import com.sipho.authentication.dto.supabase.SupabaseSignupRequest;
 import com.sipho.authentication.dto.supabase.SupabaseVerifyRequest;
@@ -39,15 +39,15 @@ public class SupabaseAuthClient {
         log.debug("Calling Supabase signup endpoint for email: {}", maskEmail(request.getEmail()));
 
         try {
-            return supabaseRestClient.post()
+            SupabaseAuthResponse response = supabaseRestClient.post()
                     .uri("/signup")
                     .body(request)
                     .retrieve()
-                    .onStatus(HttpStatusCode::is4xxClientError, (req, response) -> {
-                        int statusCode = response.getStatusCode().value();
+                    .onStatus(HttpStatusCode::is4xxClientError, (req, httpResp) -> {
+                        int statusCode = httpResp.getStatusCode().value();
                         String body;
                         try {
-                            body = new String(response.getBody().readAllBytes());
+                            body = new String(httpResp.getBody().readAllBytes());
                         } catch (Exception e) {
                             body = "Unable to read response body";
                         }
@@ -66,12 +66,27 @@ public class SupabaseAuthClient {
                         }
                         throw new SupabaseAuthException("Signup failed: " + body, statusCode, "SIGNUP_FAILED");
                     })
-                    .onStatus(HttpStatusCode::is5xxServerError, (req, response) -> {
-                        int statusCode = response.getStatusCode().value();
+                    .onStatus(HttpStatusCode::is5xxServerError, (req, httpResp) -> {
+                        int statusCode = httpResp.getStatusCode().value();
                         log.error("Supabase server error during signup: {}", statusCode);
                         throw new ServiceUnavailableException("Supabase authentication service is temporarily unavailable. Please try again later.");
                     })
                     .body(SupabaseAuthResponse.class);
+
+            // Log the response for debugging
+            log.debug("Supabase signup response - User: {}, Session: {}",
+                    response.getUser() != null ? response.getUser().getId() : "null",
+                    response.getSession() != null ? "present" : "null");
+
+            // Check if user already exists (Supabase returns success but with empty identities)
+            if (response.getUser() != null &&
+                response.getUser().getIdentities() != null &&
+                response.getUser().getIdentities().isEmpty()) {
+                log.warn("User signup returned empty identities - user likely already exists: {}", maskEmail(request.getEmail()));
+                throw new UserAlreadyExistsException("User with this email already exists");
+            }
+
+            return response;
         } catch (SupabaseAuthException e) {
             throw e;
         } catch (ResourceAccessException e) {
@@ -79,6 +94,70 @@ public class SupabaseAuthClient {
         } catch (Exception e) {
             log.error("Unexpected error during signup: {}", e.getMessage(), e);
             throw new ServiceUnavailableException("Failed to connect to authentication service. Please check your configuration.", e);
+        }
+    }
+
+    /**
+     * Check if a user with the given email already exists.
+     *
+     * @param email Email address to check
+     * @return true if user exists, false otherwise
+     */
+    public boolean checkUserExists(String email) {
+        log.info("Checking if user exists for email: {}", maskEmail(email));
+
+        try {
+            // Use OTP endpoint with createUser=false to check existence
+            // This will succeed (200) if user exists, fail (400) if user doesn't exist
+            SupabaseOtpRequest request = SupabaseOtpRequest.builder()
+                    .email(email)
+                    .createUser(false)
+                    .build();
+
+            supabaseRestClient.post()
+                    .uri("/otp")
+                    .body(request)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::is4xxClientError, (req, response) -> {
+                        int statusCode = response.getStatusCode().value();
+                        String body;
+                        try {
+                            body = new String(response.getBody().readAllBytes());
+                        } catch (Exception e) {
+                            body = "Unable to read response body";
+                        }
+
+                        log.info("OTP check returned status {}, body: {}", statusCode, body);
+
+                        // 429 means rate limit - user likely exists but we can't send OTP
+                        if (statusCode == 429) {
+                            log.info("Rate limit reached, assuming user exists: {}", maskEmail(email));
+                            return; // Don't throw, user exists
+                        }
+
+                        // Any other 4xx error means user doesn't exist (since createUser=false)
+                        log.info("User does not exist (status {}): {}", statusCode, maskEmail(email));
+                        throw new RuntimeException("USER_NOT_FOUND");
+                    })
+                    .toBodilessEntity();
+
+            // If we get here without error (200 response), user exists
+            log.info("User exists (OTP sent successfully): {}", maskEmail(email));
+            return true;
+
+        } catch (RuntimeException e) {
+            // Check if this is our marker exception for user not found
+            if (e.getMessage() != null && e.getMessage().contains("USER_NOT_FOUND")) {
+                log.info("User existence check completed for {}: user does NOT exist", maskEmail(email));
+                return false;
+            }
+            // Other runtime exceptions
+            log.error("Unexpected error checking user existence for {}: {}", maskEmail(email), e.getMessage(), e);
+            return false;
+        } catch (Exception e) {
+            // Network or other errors
+            log.error("Error checking user existence for {}: {}", maskEmail(email), e.getMessage(), e);
+            return false;
         }
     }
 
