@@ -1,6 +1,7 @@
 package com.sipho.authentication.client;
 
-import com.sipho.authentication.dto.supabase.SupabaseAuthResponse; 
+import com.sipho.authentication.config.SupabaseProperties;
+import com.sipho.authentication.dto.supabase.SupabaseAuthResponse;
 import com.sipho.authentication.dto.supabase.SupabaseOtpRequest;
 import com.sipho.authentication.dto.supabase.SupabaseSignupRequest;
 import com.sipho.authentication.dto.supabase.SupabaseVerifyRequest;
@@ -26,6 +27,7 @@ import java.net.UnknownHostException;
 public class SupabaseAuthClient {
 
     private final RestClient supabaseRestClient;
+    private final SupabaseProperties supabaseProperties;
 
     /**
      * Register a new user with Supabase.
@@ -130,7 +132,7 @@ public class SupabaseAuthClient {
                         log.info("OTP check returned status {}, body: {}", statusCode, body);
 
                         // 429 means rate limit - user likely exists but we can't send OTP
-                        if (statusCode == 429) {
+                        if (statusCode == 429 && supabaseProperties.getRateLimit().isEnabled()) {
                             log.info("Rate limit reached, assuming user exists: {}", maskEmail(email));
                             return; // Don't throw, user exists
                         }
@@ -187,8 +189,10 @@ public class SupabaseAuthClient {
 
                         log.error("Supabase OTP request failed with status {}: {}", statusCode, body);
 
-                        if (statusCode == 429) {
-                            throw new RateLimitException("Too many OTP requests. Please wait 60 seconds before trying again.");
+                        if (statusCode == 429 && supabaseProperties.getRateLimit().isEnabled()) {
+                            String message = supabaseProperties.getRateLimit().getMessage()
+                                    .replace("{waitTime}", String.valueOf(supabaseProperties.getRateLimit().getWaitTimeSeconds()));
+                            throw new RateLimitException(message);
                         }
                         if (statusCode == 400) {
                             throw new SupabaseAuthException("Invalid email address.", 400, "BAD_REQUEST");

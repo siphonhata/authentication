@@ -27,6 +27,7 @@ public class SupabaseProperties {
     private AuthConfig auth = new AuthConfig();
     private HttpConfig http = new HttpConfig();
     private OtpConfig otp = new OtpConfig();
+    private RateLimitConfig rateLimit = new RateLimitConfig();
 
     @Data
     public static class AuthConfig {
@@ -43,5 +44,12 @@ public class SupabaseProperties {
     public static class OtpConfig {
         private int expiryMinutes = 60;
         private String emailTemplateType = "signup";
+    }
+
+    @Data
+    public static class RateLimitConfig {
+        private boolean enabled = true;
+        private int waitTimeSeconds = 60;
+        private String message = "Too many OTP requests. Please wait {waitTime} seconds before trying again.";
     }
 }
